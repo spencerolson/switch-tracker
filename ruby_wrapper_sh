@@ -1,6 +1,6 @@
 #!/bin/bash
 
-. ~spencer/.bashrc
-ruby /Users/spencer/programming/switch-runner/switch.rb >> /Users/spencer/programming/switch-runner/switch-log.txt
-echo "ran at:" >> /Users/spencer/programming/switch-runner/jobs-log.txt
-date >> /Users/spencer/programming/switch-runner/jobs-log.txt
+. ~solson/.bashrc
+ruby /home/solson/switch-tracker/switch.rb >> /home/solson/switch-tracker/switch-log.txt
+# echo "ran at:" >> /home/solson/switch-tracker/jobs-log.txt
+# date >> /home/solson/switch-tracker/jobs-log.txt
