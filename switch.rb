@@ -2,48 +2,87 @@ require 'net/http'
 require 'json'
 require 'twilio-ruby'
 
-BEST_BUY_API_KEY = ENV['BEST_BUY_KEY']
-grey_joycon_sku = "5670003"
-red_blue_joycon_sku = "5670100"
-pro_controller_sku = "5748618"
-lat = 42.067250
-long = -87.789963
-grey_url = "https://api.bestbuy.com/v1/stores(area(#{lat},#{long},25))+products(sku=#{grey_joycon_sku})?format=json&show=storeId,storeType,address,city,region,name,phone,products.name,products.sku,products&pageSize=10&apiKey=#{BEST_BUY_API_KEY}"
-stores_with_grey = JSON.parse(Net::HTTP.get(URI(grey_url)))["stores"]
-
-red_blue_url = "https://api.bestbuy.com/v1/stores(area(#{lat},#{long},25))+products(sku=#{red_blue_joycon_sku})?format=json&show=storeId,storeType,address,city,region,name,phone,products.name,products.sku,products&pageSize=10&apiKey=#{BEST_BUY_API_KEY}"
-stores_with_red_blue = JSON.parse(Net::HTTP.get(URI(red_blue_url)))["stores"]
-# pro_controller_url = "https://api.bestbuy.com/v1/stores(area(41.936645,-87.706683,25))+products(sku=#{pro_controller_sku})?format=json&show=storeId,storeType,address,city,region,name,phone,products.name,products.sku,products&pageSize=10&apiKey=#{BEST_BUY_API_KEY}"
-# stores_with_pro_controller  = JSON.parse(Net::HTTP.get(URI(pro_controller_url)))["stores"]
-text_message = ""
-if stores_with_grey.any?
-  stores_with_grey.each do |store|
-    address = "#{store["address"]}, #{store["city"]}, #{store["region"]}"
-    text_message += "Grey Switch at #{address} #{store["phone"]}\n"
+class TwilioApi
+  def initialize
+    @twilio_account_sid = ENV['TWILIO_ACCOUNT_SID']
+    @twilio_number = ENV['TWILIO_NUMBER']
+    @twilio_auth_token = ENV['TWILIO_AUTH_TOKEN']
   end
-end
 
-if stores_with_red_blue.any?
-  stores_with_red_blue.each do |store|
-     address = "#{store["address"]}, #{store["city"]}, #{store["region"]}"
-     text_message += "Red/Blue Switch at #{address} #{store["phone"]}\n"
-  end
-end
-
-
-# Texting
-if stores_with_grey.any? || stores_with_red_blue.any?
-  puts "SENT TEXT AT at #{Time.now}. STORES WITH GREY? #{stores_with_grey.any?} STORES WITH RED/BLUE? #{stores_with_red_blue.any?}"
-  client = Twilio::REST::Client.new ENV['TWILIO_ACCOUNT_SID'], ENV['TWILIO_AUTH_TOKEN']
-  twilio_number = ENV['TWILIO_NUMBER']
-  telephone_numbers = [ENV['A_FRIENDS_NUMBER']]
-  telephone_numbers.each do |recipient|
+  def send_text(recipient, message)
+    puts "sending message #{message.inspect} to #{recipient}"
     client.messages.create(
-      from: twilio_number,
+      from: @twilio_number,
       to: recipient,
-      body: text_message[0..1500]
+      body: message[0..1500]
     )
   end
-else
-  puts "Ran at #{Time.now}. No switches available."
+
+  def client
+    @client ||= Twilio::REST::Client.new(@twilio_account_sid, @twilio_auth_token)
+  end
 end
+
+class BestBuyApi
+  def initialize
+    @best_buy_api_key = ENV['BEST_BUY_KEY']
+  end
+
+  def stores_with_product(product, lat, long)
+    sku = product[:sku]
+    product_name = product[:name]
+    url = URI("https://api.bestbuy.com/v1/stores(area(#{lat},#{long},25))+products(sku=#{sku})?format=json&show=storeId,storeType,address,city,region,name,phone,products.name,products.sku,products&pageSize=10&apiKey=#{@best_buy_api_key}")
+    stores_with_product = JSON.parse(Net::HTTP.get(url))["stores"]
+    stores_with_product.map { |store| format_store(store, product_name) }.join("\n")
+  end
+
+  def format_store(store, product_name)
+    address = "#{store["address"]}, #{store["city"]}, #{store["region"]}"
+    "#{product_name} available at #{address} #{store['phone']}"
+  end
+end
+
+class SwitchTracker
+  def initialize
+    @twilio_api = TwilioApi.new
+    @best_buy_api = BestBuyApi.new
+    @recipients = [ENV['MY_NUMBER'], ENV['A_FRIENDS_NUMBER']]
+  end
+
+  def run
+    if already_found_switch?
+      puts "Already found a switch! Nothing to do."
+      return
+    end
+
+    lat = 42.067250
+    long = -87.789963
+    products = [
+      { sku: 6364253, name: "Nintendo Switch (Gray Joy-Con)" },
+      { sku: 6364255, name: "Nintendo Switch (Red/Neon Blue Joy-Con)" },
+    ]
+
+    messages = products.map { |product| @best_buy_api.stores_with_product(product, lat, long) }
+    combined_messages = messages.reject { |message| message.empty? }.join("\n")
+
+    if combined_messages.empty?
+      puts "Ran at #{Time.now}. No switches available."
+    else
+      system "touch found_switch.txt"
+      message_recipients(combined_messages)
+    end
+  end
+
+  def already_found_switch?
+    system "test -f found_switch.txt"
+  end
+
+  def message_recipients(text_message)
+    @recipients.each do |recipient|
+      @twilio_api.send_text(recipient, text_message)
+    end
+  end
+end
+
+tracker = SwitchTracker.new
+tracker.run
